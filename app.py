@@ -86,7 +86,7 @@ def callback():
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
-                    "（純隨機模擬，娛樂用，沒有任何真實準確性）"
+                   
                 )
 
             try:
@@ -106,3 +106,4 @@ if __name__ == "__main__":
     # 本機測試用，Render 上會用 gunicorn 啟動
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
