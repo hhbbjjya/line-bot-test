@@ -18,7 +18,12 @@ else:
 
 
 def generate_prediction():
-    
+    """
+    產生一組百家樂預測結果：
+    - 結果：莊 45% / 閒 45% / 和 10%
+    - 預測機率：50% ~ 98%
+    - 推薦本金：500 ~ 10000，機率越高本越高
+    """
     r = random.random()
     if r < 0.45:
         result = "莊"
@@ -66,7 +71,7 @@ def callback():
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
-                    
+                    "（純隨機模擬，娛樂用，沒有任何真實準確性）"
                 )
 
             if line_bot_api is not None:
