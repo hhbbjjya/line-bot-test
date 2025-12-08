@@ -1,5 +1,6 @@
 import os
 import random
+import time
 from flask import Flask, request
 
 from linebot import LineBotApi
@@ -22,9 +23,26 @@ else:
     line_bot_api = None
     print("⚠️ CHANNEL_ACCESS_TOKEN 未設定，無法回覆 LINE 訊息。")
 
+# ==============================
+# 3. 使用者「連續預測模式」狀態紀錄
+#    key: user_id, value: 最後一次有效觸發時間 (time.time())
+# ==============================
+user_session_last_trigger = {}
+SESSION_TIMEOUT_SEC = 60  # 一分鐘內都算「連續預測模式」
 
 # ==============================
-# 3. 預測邏輯
+# 4. 判斷輸入是否為 6~12 個「莊/閒/和」
+# ==============================
+def is_valid_sequence(text: str) -> bool:
+    if not (6 <= len(text) <= 12):
+        return False
+    for ch in text:
+        if ch not in ["莊", "閒", "和"]:
+            return False
+    return True
+
+# ==============================
+# 5. 預測邏輯
 # ==============================
 def generate_prediction():
     """
@@ -60,16 +78,16 @@ def generate_prediction():
 
 
 # ==============================
-# 4. Webhook / 根目錄 (都支援)
+# 6. Webhook / 根目錄 (都支援)
 # ==============================
 @app.route("/", methods=["GET", "POST"])
 @app.route("/callback", methods=["GET", "POST"])
 def callback():
-    # LINE 驗證或 Render 健康檢查可能會用 GET
+    # GET 多半是健康檢查或驗證，直接回 200
     if request.method == "GET":
         return "OK", 200
 
-    # LINE 正式送 Webhook 是 POST
+    # LINE Webhook 正式請求 (POST)
     data = request.get_json(silent=True)
     print("📩 收到 LINE webhook JSON：", data)
 
@@ -81,20 +99,46 @@ def callback():
             user_text = event["message"]["text"].strip()
             reply_token = event["replyToken"]
 
-            # 如果不是輸入「莊 / 閒 / 和」就提示
-            if user_text not in ["莊", "閒", "和"]:
-                reply_text = "請給我預測結果6-12局"
+            # 拿 userId 當作 session key
+            user_id = None
+            source = event.get("source", {})
+            # 可能是 user / group / room，優先拿 userId
+            if "userId" in source:
+                user_id = source["userId"]
             else:
-                # 輸入正確關鍵字，開始預測
+                # 沒 userId 的話，退而求其次，以 groupId/roomId 當 key
+                user_id = source.get("groupId") or source.get("roomId") or "unknown"
+
+            now = time.time()
+            last_trigger = user_session_last_trigger.get(user_id, None)
+
+            # 判斷這次輸入是否為「6~12 個莊閒和」
+            valid_seq = is_valid_sequence(user_text)
+
+            # 條件 1：這次輸入是合法序列 → 觸發預測 & 更新 session 時間
+            # 條件 2：不是合法序列，但在 60 秒內有合法觸發紀錄 → 視為連續預測
+            in_session = (
+                last_trigger is not None and (now - last_trigger) <= SESSION_TIMEOUT_SEC
+            )
+
+            if valid_seq or in_session:
+                # 只要符合上面兩種狀況，就給預測
                 result, prob, bet = generate_prediction()
+
+                # 更新 session 時間（延長一分鐘窗口）
+                user_session_last_trigger[user_id] = now
+
                 reply_text = (
                     "🎲 百家樂智能預測系統\n\n"
                     f"你輸入的內容：{user_text}\n"
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
-                   
+                    
                 )
+            else:
+                # 不合法，而且不在一分鐘連續預測時間內
+                reply_text = "請給我預測結果6-12局"
 
             # 回覆訊息
             if line_bot_api is not None:
@@ -112,9 +156,8 @@ def callback():
 
 
 # ==============================
-# 5. 本機測試用
+# 7. 本機測試用
 # ==============================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-
