@@ -30,8 +30,11 @@ else:
 user_session_last_trigger = {}
 SESSION_TIMEOUT_SEC = 60  # 一分鐘內都算「連續預測模式」
 
+# 每個使用者累積輸入的牌路字串（包含莊/閒/和）
+user_history_seq = {}
+
 # ==============================
-# 4. 判斷輸入是否為 6~12 個「莊/閒/和」
+# 4. 判斷輸入是否為 6~12 個「莊/閒/和」(啟動預測用)
 # ==============================
 def is_valid_sequence(text: str) -> bool:
     if not (6 <= len(text) <= 12):
@@ -41,9 +44,18 @@ def is_valid_sequence(text: str) -> bool:
             return False
     return True
 
+# 判斷是否為「至少 1 個字，且每個都是 莊/閒/和」
+# 用在已經啟動後，追加輸入用
+def is_valid_result_chars(text: str) -> bool:
+    if len(text) < 1:
+        return False
+    for ch in text:
+        if ch not in ["莊", "閒", "和"]:
+            return False
+    return True
 
 # ==============================
-# 5-1. 牌路判斷小工具
+# 5-1. 牌路判斷小工具（莊/閒 → B/P）
 # ==============================
 
 def _seq_to_history(seq: str):
@@ -274,33 +286,24 @@ def _fake_baccarat_by_pattern(history):
 
 
 # ==============================
-# 5-2. 預測邏輯（保留你原本流程，外加牌路判斷）
+# 5-2. 預測邏輯（以你的原本設計為主，外加牌路）
 # ==============================
 def generate_prediction(history_seq: str | None):
     """
     history_seq:
-        - 如果是合法「莊閒和」字串 → 會用牌路邏輯分析
+        - 傳入目前「累積」的莊閒和字串（可能超過 12 個）
         - 如果是 None 或無法分析 → 回到原本隨機預測
     回傳: (result_text, prob, bet, detail_text)
     """
 
-    # 嘗試用牌路邏輯
-    use_pattern = history_seq is not None
     detail_lines = []
 
-    if use_pattern:
+    if history_seq is not None:
         history = _seq_to_history(history_seq)
-        # 全是「和」或長度太短 → 視為無有效牌路
-        if len(history) == 0:
-            use_pattern = False
-            detail_lines.append("這組序列幾乎全是『和局』或有效莊閒過少，改用隨機場能預測。")
-        else:
+        # 全是「和」或有效莊閒太少 → 視為無效牌路
+        if len(history) > 0:
             side, conf, reasons = _fake_baccarat_by_pattern(history)
-            if side is None or conf is None:
-                # 內部判斷覺得資料不夠好 → 也回到隨機
-                use_pattern = False
-                detail_lines.extend(reasons)
-            else:
+            if side is not None and conf is not None:
                 # 用牌路預測結果
                 result = "莊" if side == "B" else "閒"
                 prob = int(round(conf * 100))
@@ -313,7 +316,6 @@ def generate_prediction(history_seq: str | None):
                 bet = int(round(bet_float / 100.0)) * 100
                 bet = max(min_bet, min(max_bet, bet))
 
-                # 整理分析文字
                 detail_lines.extend(reasons)
                 detail_text = "📊 牌路分析：\n" + "\n".join(
                     f"{i+1}. {msg}" for i, msg in enumerate(detail_lines)
@@ -321,8 +323,13 @@ def generate_prediction(history_seq: str | None):
                 detail_text += "\n\n※ 本系統僅供娛樂參考，請勿重壓。"
 
                 return result, prob, bet, detail_text
+            else:
+                detail_lines.extend(reasons)
+        else:
+            detail_lines.append("目前有效莊/閒資料過少，無法形成穩定牌路，改用隨機場能預測。")
 
-    # 如果不能用牌路邏輯，就回到你原本的隨機預測
+    # 走到這邊代表：沒有 history_seq 或牌路不可用 → 回到你原本隨機邏輯
+
     # 1) 決定預測結果：莊 45%、閒 45%、和 10%
     r = random.random()  # 0.0 ~ 1.0
     if r < 0.45:
@@ -338,6 +345,7 @@ def generate_prediction(history_seq: str | None):
     # 3) 根據機率決定建議本金：500 ~ 10000
     min_bet = 500
     max_bet = 10000
+
     bet_float = min_bet + (prob - 50) / (98 - 50) * (max_bet - min_bet)
     bet = int(round(bet_float / 100.0)) * 100
     bet = max(min_bet, min(max_bet, bet))
@@ -388,34 +396,60 @@ def callback():
             now = time.time()
             last_trigger = user_session_last_trigger.get(user_id, None)
 
-            # 判斷這次輸入是否為「6~12 個莊閒和」
+            # 啟動條件：這次輸入是否為「6~12 個莊閒和」
             valid_seq = is_valid_sequence(user_text)
+            # 單純結果字串（至少一個字，全是莊閒和）
+            valid_result_chars = is_valid_result_chars(user_text)
 
             # 是否在連續預測模式中
             in_session = (
                 last_trigger is not None and (now - last_trigger) <= SESSION_TIMEOUT_SEC
             )
 
-            if valid_seq or in_session:
-                # 只要符合上面兩種狀況，就給預測
-                # 有合法序列就丟給牌路分析，否則 history_seq=None → 用隨機模式
-                history_seq = user_text if valid_seq else None
+            history_seq = None
+
+            if valid_seq:
+                # 第一次觸發或重新觸發：把這次輸入當起點或接在舊的後面
+                prev = user_history_seq.get(user_id, "")
+                history_seq = prev + user_text
+                user_history_seq[user_id] = history_seq
+                user_session_last_trigger[user_id] = now
+
+            elif in_session and valid_result_chars:
+                # 已在一分鐘內 & 這次輸入是合法結果字串 → 接在之前的後面
+                prev = user_history_seq.get(user_id, "")
+                history_seq = prev + user_text
+                user_history_seq[user_id] = history_seq
+                user_session_last_trigger[user_id] = now
+
+            elif in_session:
+                # 在 session 內但輸入不是莊閒和 → 仍用目前累積的牌路做一次預測
+                history_seq = user_history_seq.get(user_id, None)
+                user_session_last_trigger[user_id] = now
+
+            # 判斷要不要預測
+            if history_seq is not None:
+                # 只要有牌路（不論剛啟動還是接續），就做預測
                 result, prob, bet, detail_text = generate_prediction(history_seq)
 
-                # 更新 session 時間（延長一分鐘窗口）
-                user_session_last_trigger[user_id] = now
+                # 只顯示最近 30 手給朋友看就好
+                show_seq = history_seq[-30:]
 
                 reply_text = (
                     "🎲 百家樂智能預測系統\n\n"
-                    f"你輸入的內容：{user_text}\n"
+                    f"目前累積牌路（最近 30 手內）：{show_seq}\n\n"
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
                     f"{detail_text}"
                 )
             else:
-                # 不合法，而且不在一分鐘連續預測時間內
-                reply_text = "請給我 6～12 局的預測結果，例如：莊閒閒莊莊和閒莊閒。"
+                # 沒有啟動，也不在 session 內
+                if valid_result_chars:
+                    # 他有輸入莊/閒/和，但不足 6~12 個
+                    reply_text = "請先給我 6～12 局的結果，例如：莊閒閒莊莊和閒閒。"
+                else:
+                    reply_text = "請給我 6～12 局的預測結果，例如：莊閒閒莊莊和閒閒。"
 
             # 回覆訊息
             if line_bot_api is not None:
