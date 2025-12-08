@@ -95,7 +95,7 @@ def callback():
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
-                    "※ 本系統為隨機模擬，僅供娛樂，不代表真實賭博勝率或保證獲利。"
+                    
                 )
 
             # 回覆訊息
@@ -119,3 +119,4 @@ def callback():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
+
