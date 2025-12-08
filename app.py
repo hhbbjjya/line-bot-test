@@ -45,12 +45,7 @@ def is_valid_sequence(text: str) -> bool:
 # 5. 預測邏輯
 # ==============================
 def generate_prediction():
-    """
-    回傳：
-    - result: "莊" / "閒" / "和"
-    - prob:   50~98 (int, 百分比)
-    - bet:    500~10000 (int, 建議本金，機率越高越大)
-    """
+    
 
     # 1) 決定預測結果：莊 45%、閒 45%、和 10%
     r = random.random()  # 0.0 ~ 1.0
@@ -161,3 +156,4 @@ def callback():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
+
