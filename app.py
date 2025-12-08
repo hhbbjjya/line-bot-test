@@ -60,18 +60,16 @@ def generate_prediction():
 
 
 # ==============================
-# 4. 健康檢查用（在瀏覽器打根網址會看到）
+# 4. Webhook / 根目錄 (都支援)
 # ==============================
-@app.route("/", methods=["GET"])
-def index():
-    return "LINE 百家樂預測機器人運行中", 200
-
-
-# ==============================
-# 5. LINE Webhook callback
-# ==============================
-@app.route("/callback", methods=["POST"])
+@app.route("/", methods=["GET", "POST"])
+@app.route("/callback", methods=["GET", "POST"])
 def callback():
+    # LINE 驗證或 Render 健康檢查可能會用 GET
+    if request.method == "GET":
+        return "OK", 200
+
+    # LINE 正式送 Webhook 是 POST
     data = request.get_json(silent=True)
     print("📩 收到 LINE webhook JSON：", data)
 
@@ -95,7 +93,7 @@ def callback():
                     f"系統預測結果：{result}\n"
                     f"預測勝率：約 {prob}%\n"
                     f"建議本金：約 {bet} 元\n\n"
-                    
+                    "※ 本系統為隨機模擬，僅供娛樂，不代表真實賭博勝率或保證獲利。"
                 )
 
             # 回覆訊息
@@ -114,9 +112,8 @@ def callback():
 
 
 # ==============================
-# 6. 本機測試用
+# 5. 本機測試用
 # ==============================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-
